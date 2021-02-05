@@ -26,24 +26,66 @@
 //-----------------------------------------------------------------------------
 
 //Defines----------------------------------------------------------------------
+#define Rele 04
+#define LEDSec 02
 
+//Entrada
+#define Alarme00Hora    15
+#define Alarme00Minuto  52
+//Almoço Turno 01
+#define Alarme01Hora    15
+#define Alarme01Minuto  55
+//Almoço Turno 02
+#define Alarme02Hora    15
+#define Alarme02Minuto  58
+//Fim almoço Turno 02
+#define Alarme03Hora    16
+#define Alarme03Minuto  01
+//Café
+#define Alarme04Hora    16
+#define Alarme04Minuto  03
+//Café - Fim
+#define Alarme05Hora    16
+#define Alarme05Minuto  05
+//Saída
+#define Alarme06Hora    16
+#define Alarme06Minuto  0x08
+//Teste
+#define Alarme07Hora    16
+#define Alarme07Minuto  11
+//Duração
+#define AlarmeSegundo   04
+#define Duracao         03
 //-----------------------------------------------------------------------------
 
 //Global-----------------------------------------------------------------------
-  const char* ssid       = "AEPH do Brasil";
-  const char* password   = "Aeph2018";
-  const char* ssid2      = "AEPHTEC";
-  const char* password2  = "Aeph2021";
+    bool led = 0;
+    
+    const char* ssid       = "AEPH do Brasil";
+    const char* password   = "Aeph2018";
+    const char* ssid2      = "AEPHTEC";
+    const char* password2  = "Aeph2021";
   
-  struct tm data;//armazena as informações de Data
+    struct tm data;//armazena as informações de Data
+
+    unsigned char ucHora[8] = {Alarme00Hora, Alarme01Hora, Alarme02Hora, Alarme03Hora, Alarme04Hora, Alarme05Hora, Alarme06Hora, Alarme07Hora};
+    unsigned char ucMinuto[8] = {Alarme00Minuto, Alarme01Minuto,Alarme02Minuto,Alarme03Minuto,Alarme04Minuto,Alarme05Minuto,Alarme06Minuto,Alarme07Minuto};
 //-----------------------------------------------------------------------------
 
 //prototype--------------------------------------------------------------------
+void vTimeGet();
 void vRequestTime(long * unixTime);
 long lReturnUnixTime(String getURL);
+void controleFluxo(unsigned char *ucControl);
+void vPrintTime();
+void vAlarm();
 //-----------------------------------------------------------------------------
 void setup()
 {
+    //Configuração de pinos
+    pinMode(Rele, OUTPUT);
+    pinMode(LEDSec, OUTPUT);
+    
     Serial.begin(115200);
 
     WiFi.begin(ssid, password);
@@ -59,55 +101,47 @@ void setup()
 
 void loop() 
 {
+    unsigned char control = 0x00;
+    unsigned int second = 0;
+    time_t tt = 0;
+    digitalWrite(Rele, LOW);
+    while(1)
+    {
+        controleFluxo(&control);
+        if(control == 0x02)
+        {
+            vAlarm();
+            control = 0x01;
+        }
+
+        tt = time(NULL); //Obtem o tempo atual em segundos. 
+        data = *gmtime(&tt);
+
+        if(second != data.tm_sec)
+        {
+            vPrintTime();
+            second = data.tm_sec;
+            led = !led;
+            digitalWrite(LEDSec, led);
+        }
+        
+    }
+}
+
+void vTimeGet()
+{
     long int unixTime = 0;
     vRequestTime(&unixTime);
     if(unixTime != -1)
     {
         timeval tv;                         //cria a estrutura temporaria para função abaixo
-        tv.tv_sec = unixTime - 10800;       //Atribui data atual retirada do servidor 
+        tv.tv_sec = unixTime - 10803;       //Atribui data atual retirada do servidor 
         settimeofday(&tv, NULL);            //Configura o RTC para manter a data atribuida atualizada 
+        Serial.println("Timer Atualizado!");
     }
     else 
     {
         Serial.println("Erro...");
-    }
-    
-
-
-    while(1)
-    {
-        char data_formatada[64];
-        time_t tt = time(NULL); //Obtem o tempo atual em segundos. 
-        data = *gmtime(&tt);
-        strftime(data_formatada, 64, "%H:%M:%S", &data);
-
-        Serial.print(data_formatada);
-        switch(data.tm_wday)
-        {
-            case 0:
-                Serial.println(" Domingo");
-                break;
-            case 1:
-                Serial.println(" Segunda");
-                break;
-            case 2:
-                Serial.println(" Terça");
-                break;
-            case 3:
-                Serial.println(" Quarta");
-                break;
-            case 4:
-                Serial.println(" Quinta");
-                break;
-            case 5:
-                Serial.println(" Sexta");
-                break;
-            case 6:
-                Serial.println(" Sabado");
-                break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-
     }
 }
 
@@ -159,4 +193,70 @@ long lReturnUnixTime(String getURL)
     int week_number = doc["week_number"]; // 5
 
     return unixtime;
+}
+
+
+void controleFluxo(unsigned char *ucControl)
+{
+    unsigned char _aux00 = *ucControl;
+    static unsigned int ucDayofWeek = 0;
+    time_t tt = time(NULL); //Obtem o tempo atual em segundos.
+    tt = time(NULL); //Obtem o tempo atual em segundos.
+    data = *gmtime(&tt);
+    if (_aux00 == 0x00)
+    {
+        _aux00 = 0x01;
+        ucDayofWeek = data.tm_wday;
+        vTimeGet();
+    }
+    else
+    {
+        for (size_t i = 0; i < sizeof(ucHora); i++)
+        {
+            if(ucHora[i] == data.tm_hour && ucMinuto[i] == data.tm_min && data.tm_sec < AlarmeSegundo)
+            {
+                _aux00 = 0x02;
+                break;
+            }
+        }
+    }
+    if (ucDayofWeek != data.tm_wday)
+    {
+        _aux00 = 0x00;
+    }
+    *ucControl = _aux00; 
+}
+
+void vPrintTime()
+{
+    char data_formatada[64];
+    time_t tt = time(NULL); //Obtem o tempo atual em segundos. 
+    data = *gmtime(&tt);
+    strftime(data_formatada, 64, "%H:%M:%S", &data);
+    Serial.println(data_formatada);
+}
+
+void vAlarm()
+{
+    time_t tt = time(NULL); //Obtem o tempo atual em segundos.
+    unsigned int tempo = data.tm_sec;
+    
+    digitalWrite(Rele, HIGH);
+    
+    while(tempo + 3 > data.tm_sec )
+    {
+        tt = time(NULL); //Obtem o tempo atual em segundos.
+        data = *gmtime(&tt);
+    }
+    
+    digitalWrite(Rele, LOW);
+    
+    tt = time(NULL); //Obtem o tempo atual em segundos.
+    data = *gmtime(&tt);
+    tempo = data.tm_sec;
+    while(tempo + 2 > data.tm_sec )
+    {
+        tt = time(NULL); //Obtem o tempo atual em segundos.
+        data = *gmtime(&tt);
+    }
 }
