@@ -26,8 +26,9 @@
 //-----------------------------------------------------------------------------
 
 //Defines----------------------------------------------------------------------
-#define Rele 04
-#define LEDSec 02
+#define Rele            04
+#define LEDSec          02
+#define RTCAtt          16
 
 //Entrada
 #define Alarme00Hora    15
@@ -60,6 +61,7 @@
 
 //Global-----------------------------------------------------------------------
     bool led = 0;
+    bool internetConnected = 0;
     
     const char* ssid       = "AEPH do Brasil";
     const char* password   = "Aeph2018";
@@ -73,6 +75,7 @@
 //-----------------------------------------------------------------------------
 
 //prototype--------------------------------------------------------------------
+void vConnectInternet(bool * answer);
 void vTimeGet();
 void vRequestTime(long * unixTime);
 long lReturnUnixTime(String getURL);
@@ -85,18 +88,9 @@ void setup()
     //Configuração de pinos
     pinMode(Rele, OUTPUT);
     pinMode(LEDSec, OUTPUT);
-    
+    pinMode(RTCAtt, OUTPUT);
     Serial.begin(115200);
-
-    WiFi.begin(ssid, password);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-    delay(500);
-    Serial.println("Conectando ao WiFi...");
-    }
-    Serial.println("Conectado a Rede WiFi...");
-
+    vConnectInternet(&internetConnected);
 }
 
 void loop() 
@@ -127,7 +121,29 @@ void loop()
         
     }
 }
+//-----------------------------------------------------------------------------
+void vConnectInternet(bool * answer)
+{
+    unsigned char tentativas = 0xFF;
+    WiFi.begin(ssid, password);
 
+    while(tentativas--)
+    {
+        delay(500);
+        Serial.println("Conectando ao WiFi...");
+        if(WiFi.status() == WL_CONNECTED)
+        {
+            digitalWrite(RTCAtt,LOW);
+            tentativas = 0;
+            *answer = 1;
+        }
+    }
+    Serial.println("Conectado a Rede WiFi...");
+    
+}
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
 void vTimeGet()
 {
     long int unixTime = 0;
@@ -144,29 +160,47 @@ void vTimeGet()
         Serial.println("Erro...");
     }
 }
+//-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
 void vRequestTime(long * unixTime)
 {
+    bool answerConnect = 0;
+    unsigned char tentativas = 0xFF;
     HTTPClient http;  
     //ANTES DE EFETUAR A REQUISIÇÃO VERIFICA SE A CONEXÃO AINDA ESTA ATIVA 
-    if((WiFi.status() == WL_CONNECTED))
+    while(tentativas--)
     {
-        http.begin("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
-        int httpCode = http.GET();
-        //VERIFICA SE A REQUISIÇÃO TEVE RESPOSTA 
-        if(httpCode > 0)
+        if((WiFi.status() == WL_CONNECTED))
         {
-            String payload = http.getString();
-            *unixTime = lReturnUnixTime(payload); 
+            http.begin("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
+            int httpCode = http.GET();
+            //VERIFICA SE A REQUISIÇÃO TEVE RESPOSTA 
+            if(httpCode > 0)
+            {
+                String payload = http.getString();
+                *unixTime = lReturnUnixTime(payload); 
+                digitalWrite(RTCAtt,LOW);
+                break;
+            }
+            else
+            {
+                Serial.println("Erro na requisição");
+                digitalWrite(RTCAtt,HIGH);
+                *unixTime = -1; 
+            }
         }
         else
         {
-            Serial.println("Erro na requisição");
-            *unixTime = -1; 
+            vConnectInternet(&answerConnect);
         }
     }
-}
+    if(tentativas == 0x00) digitalWrite(RTCAtt,HIGH);
 
+}
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
 long lReturnUnixTime(String getURL)
 {
     // String input;
@@ -176,26 +210,27 @@ long lReturnUnixTime(String getURL)
     StaticJsonDocument<768> doc;
     deserializeJson(doc, getURL, DeserializationOption::Filter(filter));
     
-    const char* abbreviation = doc["abbreviation"]; // "-03"
-    const char* client_ip = doc["client_ip"]; // "177.30.2.95"
-    const char* datetime = doc["datetime"]; // "2021-02-03T11:29:56.640826-03:00"
-    int day_of_week = doc["day_of_week"]; // 3
-    int day_of_year = doc["day_of_year"]; // 34
-    bool dst = doc["dst"]; // false
-    // doc["dst_from"] is null
-    int dst_offset = doc["dst_offset"]; // 0
-    // doc["dst_until"] is null
-    int raw_offset = doc["raw_offset"]; // -10800
-    const char* timezone = doc["timezone"]; // "America/Sao_Paulo"
+    //const char* abbreviation = doc["abbreviation"]; // "-03"
+    //const char* client_ip = doc["client_ip"]; // "177.30.2.95"
+    //const char* datetime = doc["datetime"]; // "2021-02-03T11:29:56.640826-03:00"
+    //int day_of_week = doc["day_of_week"]; // 3
+    //int day_of_year = doc["day_of_year"]; // 34
+    //bool dst = doc["dst"]; // false
+        // doc["dst_from"] is null
+    //int dst_offset = doc["dst_offset"]; // 0
+        // doc["dst_until"] is null
+    //int raw_offset = doc["raw_offset"]; // -10800
+    //const char* timezone = doc["timezone"]; // "America/Sao_Paulo"
     long unixtime = doc["unixtime"]; // 1612362596
-    const char* utc_datetime = doc["utc_datetime"]; // "2021-02-03T14:29:56.640826+00:00"
-    const char* utc_offset = doc["utc_offset"]; // "-03:00"
-    int week_number = doc["week_number"]; // 5
+    //const char* utc_datetime = doc["utc_datetime"]; // "2021-02-03T14:29:56.640826+00:00"
+    //const char* utc_offset = doc["utc_offset"]; // "-03:00"
+    //int week_number = doc["week_number"]; // 5
 
     return unixtime;
 }
+//-----------------------------------------------------------------------------
 
-
+//-----------------------------------------------------------------------------
 void controleFluxo(unsigned char *ucControl)
 {
     unsigned char _aux00 = *ucControl;
@@ -226,7 +261,9 @@ void controleFluxo(unsigned char *ucControl)
     }
     *ucControl = _aux00; 
 }
+//-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
 void vPrintTime()
 {
     char data_formatada[64];
@@ -235,7 +272,9 @@ void vPrintTime()
     strftime(data_formatada, 64, "%H:%M:%S", &data);
     Serial.println(data_formatada);
 }
+//-----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
 void vAlarm()
 {
     time_t tt = time(NULL); //Obtem o tempo atual em segundos.
@@ -260,3 +299,4 @@ void vAlarm()
         data = *gmtime(&tt);
     }
 }
+//-----------------------------------------------------------------------------

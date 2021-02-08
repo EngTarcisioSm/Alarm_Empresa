@@ -1,0 +1,6 @@
+{
+        "files.associations": {
+                "connectinternet.h": "c",
+                "wifi.h": "c"
+        }
+}
