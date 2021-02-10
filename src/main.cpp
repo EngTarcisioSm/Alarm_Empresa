@@ -284,7 +284,7 @@ void controleFluxo(unsigned char *ucControl)
                 break;
             }
         }
-        if(digitalRead(Button) == 0 && buttonbouce == 0)
+        if((digitalRead(Button) == 0) && (buttonbouce == 0))
         {
             tt = time(NULL); //Obtem o tempo atual em segundos.
             tt2 = tt;
@@ -296,10 +296,10 @@ void controleFluxo(unsigned char *ucControl)
             {
                 _aux00 = 0x02;
                 buttonbouce = 0x01;
-            }
+            }  
             
         }
-        else
+        else if((digitalRead(Button) == 1) && (buttonbouce == 1))
         {
             buttonbouce = 0x00;
         }
