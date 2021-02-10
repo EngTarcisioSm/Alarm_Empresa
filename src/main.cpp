@@ -117,6 +117,7 @@ void loop()
     unsigned int second = 0;
     time_t tt = 0;
     digitalWrite(Rele, LOW);
+    digitalWrite(RTCAtt,HIGH);
     while(1)
     {
         controleFluxo(&control);
@@ -130,6 +131,7 @@ void loop()
         else if(control == 0x03) //DESLIGA LED INDICADOR DE SEGUNDOS
         {
             secLedAct = 0;
+            control = 0x01;
         }
         else if(control == 0x04) //ACIONAMENTO DE ALARME MANUAL
         {
@@ -153,11 +155,11 @@ void loop()
 //-----------------------------------------------------------------------------
 void vConnectInternet(bool * answer)
 {
-    unsigned char tentativas = 0xFF;
+    unsigned char tentativas = 0x0A;
     
     while(tentativas--)
     {
-        WiFi.begin(ssid, password);
+        WiFi.begin(ssid2, password2);
         
         delay(500);
         Serial.println("Conectando ao WiFi...");
@@ -167,6 +169,7 @@ void vConnectInternet(bool * answer)
             tentativas = 0;
             *answer = 1;
         }
+        timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
     }
     Serial.println("Conectado a Rede WiFi...");
     
@@ -184,18 +187,20 @@ void vDisconnected()
 long lTimeGet()
 {
     long unixTime = 0;
+    timeval tv; //cria a estrutura temporaria para função abaixo
     vRequestTime(&unixTime);
     if(unixTime != -1)
-    {
-        timeval tv;                         //cria a estrutura temporaria para função abaixo
+    {                 
         tv.tv_sec = unixTime - 10803;       //Atribui data atual retirada do servidor 
-        settimeofday(&tv, NULL);            //Configura o RTC para manter a data atribuida atualizada 
         Serial.println("Timer Atualizado!");
     }
     else 
     {
         Serial.println("Erro...");
+        tv.tv_sec = 0;
+        unixTime = -1;
     }
+    settimeofday(&tv, NULL);            //Configura o RTC para manter a data atribuida atualizada 
     return unixTime;
 }
 //-----------------------------------------------------------------------------
@@ -208,32 +213,39 @@ void vRequestTime(long * unixTime)
     HTTPClient http;  
     //ANTES DE EFETUAR A REQUISIÇÃO VERIFICA SE A CONEXÃO AINDA ESTA ATIVA 
     vConnectInternet(&answerConnect);
-    while(tentativas--)
-    {
-        if((WiFi.status() == WL_CONNECTED))
+    if(answerConnect)
+    { 
+        while(tentativas--)
         {
-            http.begin("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
-            int httpCode = http.GET();
-            //VERIFICA SE A REQUISIÇÃO TEVE RESPOSTA 
-            if(httpCode > 0)
+            if((WiFi.status() == WL_CONNECTED))
             {
-                String payload = http.getString();
-                *unixTime = lReturnUnixTime(payload); 
-                digitalWrite(RTCAtt,LOW);
-                vDisconnected();
-                break;
+                http.begin("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
+                int httpCode = http.GET();
+                //VERIFICA SE A REQUISIÇÃO TEVE RESPOSTA 
+                if(httpCode > 0)
+                {
+                    String payload = http.getString();
+                    *unixTime = lReturnUnixTime(payload); 
+                    digitalWrite(RTCAtt,LOW);
+                    vDisconnected();
+                    break;
+                }
+                else
+                {
+                    Serial.println("Erro na requisição");
+                    digitalWrite(RTCAtt,HIGH);
+                    *unixTime = -1; 
+                }
             }
             else
             {
-                Serial.println("Erro na requisição");
-                digitalWrite(RTCAtt,HIGH);
-                *unixTime = -1; 
+                vConnectInternet(&answerConnect);
             }
+            timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
         }
-        else
-        {
-            vConnectInternet(&answerConnect);
-        }
+    }
+    else{
+        answerConnect = 0x00;
     }
     if(tentativas == 0x00) digitalWrite(RTCAtt,HIGH);
 
