@@ -29,31 +29,32 @@
 #define Rele            04
 #define LEDSec          02
 #define RTCAtt          16
+#define Button          17
 
 //Entrada
-#define Alarme00Hora    15
-#define Alarme00Minuto  52
+#define Alarme00Hora    07
+#define Alarme00Minuto  40
 //Almoço Turno 01
-#define Alarme01Hora    15
-#define Alarme01Minuto  55
+#define Alarme01Hora    11
+#define Alarme01Minuto  30
 //Almoço Turno 02
-#define Alarme02Hora    15
-#define Alarme02Minuto  58
+#define Alarme02Hora    12
+#define Alarme02Minuto  00
 //Fim almoço Turno 02
-#define Alarme03Hora    16
-#define Alarme03Minuto  01
+#define Alarme03Hora    13
+#define Alarme03Minuto  00
 //Café
-#define Alarme04Hora    16
-#define Alarme04Minuto  03
+#define Alarme04Hora    15
+#define Alarme04Minuto  15
 //Café - Fim
-#define Alarme05Hora    16
-#define Alarme05Minuto  05
+#define Alarme05Hora    15
+#define Alarme05Minuto  30
 //Saída
-#define Alarme06Hora    16
-#define Alarme06Minuto  0x08
+#define Alarme06Hora    17
+#define Alarme06Minuto  33
 //Teste
-#define Alarme07Hora    16
-#define Alarme07Minuto  11
+#define Alarme07Hora    9
+#define Alarme07Minuto  27
 //Duração
 #define AlarmeSegundo   04
 #define Duracao         03
@@ -70,18 +71,27 @@
   
     struct tm data;//armazena as informações de Data
 
+    hw_timer_t *timer = NULL;//fazo controle do temporizador (interrupção por tempo)
+
     unsigned char ucHora[8] = {Alarme00Hora, Alarme01Hora, Alarme02Hora, Alarme03Hora, Alarme04Hora, Alarme05Hora, Alarme06Hora, Alarme07Hora};
     unsigned char ucMinuto[8] = {Alarme00Minuto, Alarme01Minuto,Alarme02Minuto,Alarme03Minuto,Alarme04Minuto,Alarme05Minuto,Alarme06Minuto,Alarme07Minuto};
 //-----------------------------------------------------------------------------
 
 //prototype--------------------------------------------------------------------
 void vConnectInternet(bool * answer);
+void vDisconnected();
 void vTimeGet();
 void vRequestTime(long * unixTime);
 long lReturnUnixTime(String getURL);
 void controleFluxo(unsigned char *ucControl);
 void vPrintTime();
 void vAlarm();
+
+void IRAM_ATTR resetModule()
+{
+    ets_printf("(watchdog)Resetado...\n");
+    esp_restart();
+}
 //-----------------------------------------------------------------------------
 void setup()
 {
@@ -89,8 +99,15 @@ void setup()
     pinMode(Rele, OUTPUT);
     pinMode(LEDSec, OUTPUT);
     pinMode(RTCAtt, OUTPUT);
+    pinMode(Button, INPUT);
     Serial.begin(115200);
-    vConnectInternet(&internetConnected);
+
+    timer = timerBegin(0,80,true);
+    timerAttachInterrupt(timer, &resetModule, true);
+    timerAlarmWrite(timer,6000000, true);
+    timerAlarmEnable(timer);
+
+
 }
 
 void loop() 
@@ -101,6 +118,7 @@ void loop()
     digitalWrite(Rele, LOW);
     while(1)
     {
+        timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
         controleFluxo(&control);
         if(control == 0x02)
         {
@@ -125,10 +143,11 @@ void loop()
 void vConnectInternet(bool * answer)
 {
     unsigned char tentativas = 0xFF;
-    WiFi.begin(ssid, password);
-
+    
     while(tentativas--)
     {
+        WiFi.begin(ssid, password);
+        
         delay(500);
         Serial.println("Conectando ao WiFi...");
         if(WiFi.status() == WL_CONNECTED)
@@ -140,6 +159,13 @@ void vConnectInternet(bool * answer)
     }
     Serial.println("Conectado a Rede WiFi...");
     
+}
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+void vDisconnected()
+{
+    WiFi.disconnect();
 }
 //-----------------------------------------------------------------------------
 
@@ -169,6 +195,7 @@ void vRequestTime(long * unixTime)
     unsigned char tentativas = 0xFF;
     HTTPClient http;  
     //ANTES DE EFETUAR A REQUISIÇÃO VERIFICA SE A CONEXÃO AINDA ESTA ATIVA 
+    vConnectInternet(&answerConnect);
     while(tentativas--)
     {
         if((WiFi.status() == WL_CONNECTED))
@@ -181,6 +208,7 @@ void vRequestTime(long * unixTime)
                 String payload = http.getString();
                 *unixTime = lReturnUnixTime(payload); 
                 digitalWrite(RTCAtt,LOW);
+                vDisconnected();
                 break;
             }
             else
@@ -235,7 +263,9 @@ void controleFluxo(unsigned char *ucControl)
 {
     unsigned char _aux00 = *ucControl;
     static unsigned int ucDayofWeek = 0;
+    static unsigned char buttonbouce = 0;
     time_t tt = time(NULL); //Obtem o tempo atual em segundos.
+    time_t tt2 = 0;
     tt = time(NULL); //Obtem o tempo atual em segundos.
     data = *gmtime(&tt);
     if (_aux00 == 0x00)
@@ -253,6 +283,25 @@ void controleFluxo(unsigned char *ucControl)
                 _aux00 = 0x02;
                 break;
             }
+        }
+        if(digitalRead(Button) == 0 && buttonbouce == 0)
+        {
+            tt = time(NULL); //Obtem o tempo atual em segundos.
+            tt2 = tt;
+            while(tt2+1 > tt)
+            {
+                tt = time(NULL); //Obtem o tempo atual em segundos.  
+            }
+            if(digitalRead(Button) == 0) 
+            {
+                _aux00 = 0x02;
+                buttonbouce = 0x01;
+            }
+            
+        }
+        else
+        {
+            buttonbouce = 0x00;
         }
     }
     if (ucDayofWeek != data.tm_wday)
@@ -300,3 +349,4 @@ void vAlarm()
     }
 }
 //-----------------------------------------------------------------------------
+
