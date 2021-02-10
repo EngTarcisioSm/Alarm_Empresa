@@ -80,7 +80,7 @@
 //prototype--------------------------------------------------------------------
 void vConnectInternet(bool * answer);
 void vDisconnected();
-void vTimeGet();
+long lTimeGet();
 void vRequestTime(long * unixTime);
 long lReturnUnixTime(String getURL);
 void controleFluxo(unsigned char *ucControl);
@@ -104,7 +104,7 @@ void setup()
 
     timer = timerBegin(0,80,true);
     timerAttachInterrupt(timer, &resetModule, true);
-    timerAlarmWrite(timer,6000000, true);
+    timerAlarmWrite(timer,4000000, true);
     timerAlarmEnable(timer);
 
 
@@ -112,15 +112,26 @@ void setup()
 
 void loop() 
 {
+    bool secLedAct = 1;
     unsigned char control = 0x00;
     unsigned int second = 0;
     time_t tt = 0;
     digitalWrite(Rele, LOW);
     while(1)
     {
-        timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
         controleFluxo(&control);
-        if(control == 0x02)
+        timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
+        if(control == 0x02) //acionamento por RTC
+        {
+            vAlarm();
+            control = 0x01;
+            secLedAct = 1;
+        }
+        else if(control == 0x03) //DESLIGA LED INDICADOR DE SEGUNDOS
+        {
+            secLedAct = 0;
+        }
+        else if(control == 0x04) //ACIONAMENTO DE ALARME MANUAL
         {
             vAlarm();
             control = 0x01;
@@ -134,7 +145,7 @@ void loop()
             vPrintTime();
             second = data.tm_sec;
             led = !led;
-            digitalWrite(LEDSec, led);
+            if(secLedAct == 1) digitalWrite(LEDSec, led);
         }
         
     }
@@ -170,9 +181,9 @@ void vDisconnected()
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-void vTimeGet()
+long lTimeGet()
 {
-    long int unixTime = 0;
+    long unixTime = 0;
     vRequestTime(&unixTime);
     if(unixTime != -1)
     {
@@ -185,6 +196,7 @@ void vTimeGet()
     {
         Serial.println("Erro...");
     }
+    return unixTime;
 }
 //-----------------------------------------------------------------------------
 
@@ -262,6 +274,7 @@ long lReturnUnixTime(String getURL)
 void controleFluxo(unsigned char *ucControl)
 {
     unsigned char _aux00 = *ucControl;
+    long requestTimeGet = 0;
     static unsigned int ucDayofWeek = 0;
     static unsigned char buttonbouce = 0;
     time_t tt = time(NULL); //Obtem o tempo atual em segundos.
@@ -272,7 +285,11 @@ void controleFluxo(unsigned char *ucControl)
     {
         _aux00 = 0x01;
         ucDayofWeek = data.tm_wday;
-        vTimeGet();
+        requestTimeGet = lTimeGet();
+        if(requestTimeGet == -1)
+        {
+            _aux00 = 0x03;
+        }
     }
     else
     {
@@ -294,7 +311,7 @@ void controleFluxo(unsigned char *ucControl)
             }
             if(digitalRead(Button) == 0) 
             {
-                _aux00 = 0x02;
+                _aux00 = 0x04;
                 buttonbouce = 0x01;
             }  
             
@@ -330,7 +347,7 @@ void vAlarm()
     unsigned int tempo = data.tm_sec;
     
     digitalWrite(Rele, HIGH);
-    
+    timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
     while(tempo + 3 > data.tm_sec )
     {
         tt = time(NULL); //Obtem o tempo atual em segundos.
@@ -342,6 +359,7 @@ void vAlarm()
     tt = time(NULL); //Obtem o tempo atual em segundos.
     data = *gmtime(&tt);
     tempo = data.tm_sec;
+    timerWrite(timer,0); //reseta o temporizador alimenta o watchdog
     while(tempo + 2 > data.tm_sec )
     {
         tt = time(NULL); //Obtem o tempo atual em segundos.
